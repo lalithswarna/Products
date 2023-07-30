@@ -2,11 +2,15 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Products;
 using Products.Data;
+using Azure.Storage.Blobs;
+
 
 namespace Products.Controllers
 {
@@ -15,10 +19,12 @@ namespace Products.Controllers
     public class ProductsController : ControllerBase
     {
         private readonly ProductsContext _context;
+        private readonly IConfiguration _configuration;
 
-        public ProductsController(ProductsContext context)
+        public ProductsController(ProductsContext context, IConfiguration configuration)
         {
             _context = context;
+            _configuration = configuration;
         }
 
         // GET: api/Products
@@ -114,6 +120,26 @@ namespace Products.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        [HttpPost("upload-image/{productId}")]
+        public async Task<IActionResult> UploadImage(int productId, IFormFile imageFile)
+        {
+            // Implement the code to upload the image to Azure Blob Storage here
+            // Use the product ID or any other unique identifier to create the blob name
+            // Save the image file in Azure Blob Storage using the provided connection string
+
+            // Example code (assuming you have the image bytes in the 'imageFile' parameter):
+            BlobServiceClient blobServiceClient = new BlobServiceClient(_configuration["ConnectionStrings:AzureStorageConnection"]);
+            BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient("ecommproducts");
+
+            string blobName = "product_" + productId + "_image.jpg";
+            BlobClient blobClient = containerClient.GetBlobClient(blobName);
+
+            using var imageStream = imageFile.OpenReadStream();
+            await blobClient.UploadAsync(imageStream, overwrite: true);
+
+            return Ok("Image uploaded successfully");
         }
 
         private bool ProductExists(int id)
