@@ -10,7 +10,8 @@ using Microsoft.EntityFrameworkCore;
 using Products;
 using Products.Data;
 using Azure.Storage.Blobs;
-
+using Products.Interface;
+using Products.Middleware;
 
 namespace Products.Controllers
 {
@@ -20,106 +21,122 @@ namespace Products.Controllers
     {
         private readonly ProductsContext _context;
         private readonly IConfiguration _configuration;
+        private readonly IProductRepository _productRepository;
+        private readonly ILogger<ExceptionMiddleware> _logger;
 
-        public ProductsController(ProductsContext context, IConfiguration configuration)
+        public ProductsController(ProductsContext context, IConfiguration configuration, IProductRepository productRepository, ILogger<ExceptionMiddleware> logger)
         {
             _context = context;
             _configuration = configuration;
+            _productRepository = productRepository;
+            _logger = logger;
         }
 
-        // GET: api/Products
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Product>>> GetProduct()
+        public async Task<IActionResult> GetProducts()
         {
-          if (_context.Product == null)
-          {
-              return NotFound();
-          }
-            return await _context.Product.ToListAsync();
-        }
-
-        // GET: api/Products/5
-        [HttpGet("{id}")]
-        public async Task<ActionResult<Product>> GetProduct(int id)
-        {
-          if (_context.Product == null)
-          {
-              return NotFound();
-          }
-            var product = await _context.Product.FindAsync(id);
-
-            if (product == null)
-            {
-                return NotFound();
-            }
-
-            return product;
-        }
-
-        // PUT: api/Products/5
-        // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-        [HttpPut("{id}")]
-        public async Task<IActionResult> PutProduct(int id, Product product)
-        {
-            if (id != product.ID)
-            {
-                return BadRequest();
-            }
-
-            _context.Entry(product).State = EntityState.Modified;
-
             try
             {
-                await _context.SaveChangesAsync();
+                var products = await _productRepository.GetAllProducts();
+
+                if (products == null || products.Count() < 1)
+                    throw new NotFoundException($"Products not found.");
+                return Ok(products);
+
             }
-            catch (DbUpdateConcurrencyException)
+            catch (NotFoundException ex)
             {
-                if (!ProductExists(id))
-                {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
-                }
+                _logger.LogInformation(ex, ex.Message);
+                return NotFound();
             }
-
-            return NoContent();
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while getting products, products not found");
+                return StatusCode(StatusCodes.Status500InternalServerError);
+            }
         }
 
-        // POST: api/Products
-        // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-        [HttpPost]
-        public async Task<ActionResult<Product>> PostProduct(Product product)
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetProductById(int id)
         {
-          if (_context.Product == null)
-          {
-              return Problem("Entity set 'ProductsContext.Product'  is null.");
-          }
-            _context.Product.Add(product);
-            await _context.SaveChangesAsync();
+            try
+            {
+                var product = await _productRepository.GetProductById(id);
+                if (product == null)
+                    throw new NotFoundException($"Product with ID {id} not found.");
 
-            return CreatedAtAction("GetProduct", new { id = product.ID }, product);
+                return Ok(product);
+            }
+            catch (NotFoundException ex)
+            {
+                _logger.LogInformation(ex, ex.Message);
+                return NotFound();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while getting product by ID");
+                return StatusCode(StatusCodes.Status500InternalServerError);
+            }
         }
 
-        // DELETE: api/Products/5
+        [HttpPost]
+        public async Task<IActionResult> AddProduct(Product product)
+        {
+            try
+            {
+                await _productRepository.AddProduct(product);
+                return CreatedAtAction(nameof(GetProductById), new { id = product.ID }, product);
+
+            }
+            catch(Exception ex)
+            {
+                _logger.LogError(ex, "Error while adding the product.");
+                return StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateProduct(int id, Product product)
+        {
+            try
+            {
+                if (id != product.ID)
+                    throw new NotFoundException($"Product with ID {id} not found.");
+
+                await _productRepository.UpdateProduct(product);
+                return NoContent();
+
+            }
+            catch (NotFoundException ex)
+            {
+                _logger.LogInformation(ex, ex.Message);
+                return BadRequest();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while updating the product.");
+                return StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        }
+
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteProduct(int id)
         {
-            if (_context.Product == null)
+            try
             {
-                return NotFound();
+                var product = await _productRepository.GetProductById(id);
+                if (product == null)
+                    throw new NotFoundException($"Product with ID {id} not found.");
+
+                await _productRepository.DeleteProduct(id);
+                return NoContent();
+
             }
-            var product = await _context.Product.FindAsync(id);
-            if (product == null)
+            catch(Exception ex)
             {
-                return NotFound();
+                _logger.LogError(ex, "Error while adding the product.");
+                return StatusCode(StatusCodes.Status500InternalServerError);
             }
-
-            _context.Product.Remove(product);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
         }
 
         [HttpPost("upload-image/{productId}")]
